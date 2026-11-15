@@ -1,0 +1,31 @@
+{
+  "name": "sprint-sentinel",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Sprint Sentinel, an autonomous Jira and Confluence delivery agent for Codegeist 2026.",
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test",
+    "lint": "eslint .",
+    "simulate": "node scripts/simulate.js",
+    "forge:lint": "forge lint"
+  },
+  "dependencies": {
+    "@forge/api": "^8.5.0",
+    "@forge/bridge": "^7.3.0",
+    "@forge/kvs": "^2.1.2",
+    "@forge/react": "^12.5.0",
+    "@forge/resolver": "^2.0.2",
+    "@forge/teamwork-graph": "^5.4.0",
+    "react": "^18.3.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@forge/cli": "^15.1.0",
+    "@forge/manifest": "^13.9.0",
+    "eslint": "^9.39.1",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^5.2.0"
+  }
+}

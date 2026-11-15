@@ -1,0 +1,310 @@
+modules:
+  jira:issuePanel:
+    - key: sprint-sentinel-issue-panel
+      resource: main
+      resolver:
+        function: fn-resolver
+      render: native
+      title: Sprint Sentinel
+      icon: resource:icons;sentinel.svg
+  jira:projectPage:
+    - key: sprint-sentinel-project-page
+      resource: main
+      resolver:
+        function: fn-resolver
+      render: native
+      title: Sprint Sentinel
+      icon: resource:icons;sentinel.svg
+  confluence:globalPage:
+    - key: sprint-sentinel-confluence-page
+      resource: main
+      resolver:
+        function: fn-resolver
+      render: native
+      title: Sprint Sentinel
+      route: sprint-sentinel
+      icon: resource:icons;sentinel.svg
+  rovo:agent:
+    - key: sprint-sentinel-agent
+      name: Sprint Sentinel
+      description: Notices sprint risk and proposes a fix. Applies it only after a person approves.
+      icon: resource:icons;sentinel.svg
+      prompt: resource:agent;prompts/agent-prompt.txt
+      conversationStarters:
+        - What is at risk in this sprint?
+        - Which issues are stalled or blocked?
+        - Who is overloaded, and what should move?
+        - Show pending fixes waiting for approval
+      actions:
+        - scan-project
+        - explain-issue
+        - list-pending-fixes
+        - project-health
+        - graph-context
+        - propose-fix
+        - approve-fix
+        - dismiss-fix
+        - write-digest
+  rovo:mcp:
+    - key: sprint-sentinel-mcp
+      name: Sprint Sentinel
+      tools:
+        - scan-project
+        - explain-issue
+        - list-pending-fixes
+        - project-health
+        - graph-context
+        - propose-fix
+  graph:connector:
+    - key: sprint-sentinel-graph
+      name: Sprint Sentinel
+      capabilities:
+        replicatesPermissions: false
+        syncFidelity: upsert
+        supportsIncrementalSync: true
+      icons:
+        light: resource:icons;sentinel.svg
+        dark: resource:icons;sentinel.svg
+      objectTypes:
+        - atlassian:document
+      datasource:
+        onConnectionChange:
+          function: fn-connector
+  trigger:
+    - key: issue-watch
+      function: fn-issue-watch
+      events:
+        - avi:jira:created:issue
+        - avi:jira:updated:issue
+      filter:
+        ignoreSelf: true
+  scheduledTrigger:
+    - key: hourly-scan
+      function: fn-hourly-scan
+      interval: hour
+    - key: daily-digest
+      function: fn-daily-digest
+      interval: day
+  action:
+    - key: scan-project
+      name: Scan a project
+      function: fn-scan-project
+      actionVerb: GET
+      description: Check one Jira project for stalled work, blockers, scope creep, overload, and sprint-goal risk. Does not change Jira.
+      inputs:
+        projectKey:
+          title: Project key
+          type: string
+          required: false
+          description: Jira project key, for example PROJ. Uses the current project when the chat is opened there.
+    - key: explain-issue
+      name: Explain an issue
+      function: fn-explain-issue
+      actionVerb: GET
+      description: Explain the delivery risks on one issue and the fix waiting for approval. Does not change Jira.
+      inputs:
+        issueKey:
+          title: Issue key
+          type: string
+          required: true
+          description: Jira issue key, for example PROJ-123.
+        projectKey:
+          title: Project key
+          type: string
+          required: false
+          description: Project key. Optional when the issue key already includes it.
+    - key: list-pending-fixes
+      name: List pending fixes
+      function: fn-list-pending
+      actionVerb: GET
+      description: List fixes Sprint Sentinel has proposed and not yet applied or dismissed.
+      inputs:
+        projectKey:
+          title: Project key
+          type: string
+          required: true
+          description: Jira project key whose pending proposals should be listed.
+    - key: project-health
+      name: Project health
+      function: fn-project-health
+      actionVerb: GET
+      description: Report watcher health, Grok configuration, the last error, and whether a digest has been published.
+      inputs:
+        projectKey:
+          title: Project key
+          type: string
+          required: false
+          description: Optional project key to include in the health report.
+    - key: graph-context
+      name: Teamwork Graph context
+      function: fn-graph-context
+      actionVerb: GET
+      description: Return the Teamwork Graph context captured on the last check, including cross-project assignment load.
+      inputs:
+        projectKey:
+          title: Project key
+          type: string
+          required: true
+          description: Jira project key whose last Teamwork Graph snapshot should be returned.
+    - key: propose-fix
+      name: Propose a fix
+      function: fn-propose-fix
+      actionVerb: CREATE
+      description: Record a fix proposal for a risk id. Does not edit Jira. A person must approve it before anything changes.
+      inputs:
+        projectKey:
+          title: Project key
+          type: string
+          required: true
+          description: Jira project key for the risk.
+        riskId:
+          title: Risk id
+          type: string
+          required: true
+          description: Risk id returned by scan-project, for example stalled:PROJ-1.
+    - key: approve-fix
+      name: Approve a fix
+      function: fn-approve-fix
+      actionVerb: TRIGGER
+      description: Apply one pending fix after the user explicitly approves that proposal id. Set confirm true only then.
+      inputs:
+        projectKey:
+          title: Project key
+          type: string
+          required: true
+          description: Jira project key that owns the proposal.
+        proposalId:
+          title: Proposal id
+          type: string
+          required: true
+          description: Proposal id to apply, for example proposal:stalled:PROJ-1.
+        confirm:
+          title: Confirm
+          type: boolean
+          required: true
+          description: True only after the user explicitly approves this exact proposal.
+    - key: dismiss-fix
+      name: Dismiss a fix
+      function: fn-dismiss-fix
+      actionVerb: TRIGGER
+      description: Dismiss one proposal after the user explicitly rejects it. Set confirm true only then.
+      inputs:
+        projectKey:
+          title: Project key
+          type: string
+          required: true
+          description: Jira project key that owns the proposal.
+        proposalId:
+          title: Proposal id
+          type: string
+          required: true
+          description: Proposal id to dismiss.
+        confirm:
+          title: Confirm
+          type: boolean
+          required: true
+          description: True only after the user explicitly dismisses this proposal.
+    - key: write-digest
+      name: Write the daily digest
+      function: fn-write-digest
+      actionVerb: CREATE
+      description: Publish today's Confluence risk digest after the user explicitly asks. Set confirm true only then.
+      inputs:
+        projectKey:
+          title: Project key
+          type: string
+          required: false
+          description: Optional project key. Omit it to include every watched project.
+        spaceKey:
+          title: Space key
+          type: string
+          required: false
+          description: Confluence space key that should hold the digest page.
+        confirm:
+          title: Confirm
+          type: boolean
+          required: true
+          description: True only after the user explicitly asks to publish the digest.
+  function:
+    - key: fn-resolver
+      handler: index.handler
+    - key: fn-hourly-scan
+      handler: index.scheduledScan
+      timeoutSeconds: 120
+    - key: fn-daily-digest
+      handler: index.scheduledDigest
+      timeoutSeconds: 120
+    - key: fn-issue-watch
+      handler: index.onIssueEvent
+      timeoutSeconds: 90
+    - key: fn-connector
+      handler: index.onConnectionChange
+    - key: fn-scan-project
+      handler: index.actionScanProject
+      timeoutSeconds: 90
+    - key: fn-explain-issue
+      handler: index.actionExplainIssue
+      timeoutSeconds: 90
+    - key: fn-list-pending
+      handler: index.actionListPending
+    - key: fn-project-health
+      handler: index.actionProjectHealth
+    - key: fn-graph-context
+      handler: index.actionGraphContext
+    - key: fn-propose-fix
+      handler: index.actionProposeFix
+    - key: fn-approve-fix
+      handler: index.actionApproveFix
+      timeoutSeconds: 60
+    - key: fn-dismiss-fix
+      handler: index.actionDismissFix
+    - key: fn-write-digest
+      handler: index.actionWriteDigest
+      timeoutSeconds: 90
+resources:
+  - key: main
+    path: src/frontend/index.jsx
+  - key: icons
+    path: static
+  - key: agent
+    path: resource/agent
+permissions:
+  scopes:
+    - storage:app
+    - read:jira-work
+    - write:jira-work
+    - read:project:jira
+    - read:board-scope:jira-software
+    - write:board-scope:jira-software
+    - read:sprint:jira-software
+    - write:sprint:jira-software
+    - read:issue:jira-software
+    - write:issue:jira-software
+    - read:space:confluence
+    - read:page:confluence
+    - write:page:confluence
+    - read:graph:user:atlassian
+    - read:graph:issue:jira
+    - read:graph:page:confluence
+    - read:object:jira
+    - write:object:jira
+    - delete:object:jira
+  external:
+    fetch:
+      backend:
+        - address: api.x.ai
+          category: analytics
+          inScopeEUD: true
+app:
+  id: ari:cloud:ecosystem::app/00000000-0000-4000-8000-000000000001
+  licensing:
+    enabled: false
+  runtime:
+    name: nodejs24.x
+    memoryMB: 512
+    architecture: arm64
+  compatibility:
+    jira:
+      required: true
+    confluence:
+      required: false
