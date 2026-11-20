@@ -43,6 +43,25 @@ export function createKvsStore() {
     async saveProposals(projectKey, proposals) {
       await kvs.set(`proposals:${projectKey}`, proposals.slice(0, 100));
     },
+    /**
+     * Atomic lock: FAIL_IF_EXISTS makes exactly one caller win. The TTL frees a lock
+     * left behind by a crashed invocation.
+     */
+    async acquireLock(name, ttlSeconds = 120) {
+      const key = `lock:${name}`;
+      try {
+        await kvs.set(key, { at: Date.now() }, { keyPolicy: 'FAIL_IF_EXISTS', ttl: { value: ttlSeconds, unit: 'SECONDS' } });
+        return true;
+      } catch (error) {
+        const status = error?.responseDetails?.status;
+        if (status === 409 || /EXIST|CONFLICT/i.test(String(error?.code || ''))) return false;
+        if ((await kvs.get(key)) !== undefined) return false;
+        throw error;
+      }
+    },
+    async releaseLock(name) {
+      await kvs.delete(`lock:${name}`);
+    },
     async putProposal(projectKey, proposal) {
       const list = await read(`proposals:${projectKey}`, []);
       const index = list.findIndex((item) => item.id === proposal.id);

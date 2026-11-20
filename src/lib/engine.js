@@ -127,11 +127,37 @@ export async function runScan({ projectKey, deps, now = new Date().toISOString()
   }
 }
 
+export const APPLY_LOCK_SECONDS = 120;
+
+function operationSignature(operation) {
+  return JSON.stringify(operation);
+}
+
 export async function decideAndApply({ projectKey, proposalId, decision, actor = 'user', deps, now = new Date().toISOString() }) {
   const key = requireProjectKey(projectKey);
+  if (decision !== 'approve' && decision !== 'dismiss') return { ok: false, error: 'Choose approve or dismiss.' };
+  const lockName = `decide:${key}:${proposalId}`;
+  // One decision per proposal at a time. Without this, concurrent approvals each read
+  // "pending" and each write to Jira.
+  const locked = typeof deps.store.acquireLock === 'function'
+    ? await deps.store.acquireLock(lockName, APPLY_LOCK_SECONDS)
+    : true;
+  if (!locked) {
+    return { ok: false, busy: true, error: 'This proposal is already being applied. Refresh in a moment.' };
+  }
+  try {
+    return await decideLocked({ key, proposalId, decision, actor, deps, now });
+  } finally {
+    if (typeof deps.store.releaseLock === 'function') await deps.store.releaseLock(lockName);
+  }
+}
+
+async function decideLocked({ key, proposalId, decision, actor, deps, now }) {
+  // Re-read inside the lock so a decision that already landed is never repeated.
   const proposals = await deps.store.listProposals(key);
   const current = proposals.find((proposal) => proposal.id === proposalId);
   if (!current) return { ok: false, error: 'That proposal is not on this project.' };
+  const completed = Array.isArray(current.completedOps) ? current.completedOps : [];
   try {
     if (decision === 'dismiss') {
       const updated = dismissProposal(current, actor, now);
@@ -141,14 +167,29 @@ export async function decideAndApply({ projectKey, proposalId, decision, actor =
       });
       return { ok: true, proposal: updated };
     }
-    if (decision !== 'approve') return { ok: false, error: 'Choose approve or dismiss.' };
     const approved = approveProposal(current, actor, now);
     const operations = buildOperations(approved);
     const results = [];
-    for (const operation of operations) {
-      results.push(await deps.jira.execute(operation));
+    try {
+      for (let index = 0; index < operations.length; index += 1) {
+        const operation = operations[index];
+        const signature = operationSignature(operation);
+        // A retry after a partial failure skips the writes that already landed.
+        const done = completed.find((entry) => entry.index === index && entry.signature === signature);
+        if (done) {
+          results.push(done.result);
+          continue;
+        }
+        const result = await deps.jira.execute(operation);
+        results.push(result);
+        completed.push({ index, signature, result });
+      }
+    } catch (error) {
+      error.completedOps = completed;
+      throw error;
     }
     const applied = { ...approved, status: 'applied', appliedAt: now, results };
+    delete applied.completedOps;
     await deps.store.putProposal(key, applied);
     await deps.store.appendAudit(key, {
       at: now,
@@ -161,14 +202,20 @@ export async function decideAndApply({ projectKey, proposalId, decision, actor =
     });
     return { ok: true, proposal: applied, results };
   } catch (error) {
-    const alreadyDecided = current && (current.status === 'applied' || current.status === 'dismissed');
+    const alreadyDecided = current.status === 'applied' || current.status === 'dismissed';
     if (decision !== 'approve' || alreadyDecided) {
       await deps.store.appendAudit(key, {
         at: now, actor, action: decision === 'dismiss' ? 'dismiss' : 'apply', outcome: 'error', proposalId, detail: error.message,
       });
       return { ok: false, error: error.message };
     }
-    const failed = { ...current, status: 'failed', lastError: error.message, updatedAt: now };
+    const failed = {
+      ...current,
+      status: 'failed',
+      lastError: error.message,
+      updatedAt: now,
+      completedOps: error.completedOps || completed,
+    };
     await deps.store.putProposal(key, failed);
     await deps.store.appendAudit(key, {
       at: now, actor, action: 'apply', outcome: 'error', proposalId, detail: error.message,
@@ -259,7 +306,11 @@ export async function saveSettings({ store, spaceKey, thresholds, siteUrl }) {
   return store.saveConfig({
     ...config,
     spaceKey: normalizeSpaceKey(spaceKey ?? config.spaceKey),
-    thresholds: sanitizeThresholds({ ...config.thresholds, ...(thresholds || {}) }),
+    // Omitted fields keep their saved value. A blank field resets to the default.
+    thresholds: sanitizeThresholds({
+      ...config.thresholds,
+      ...Object.fromEntries(Object.entries(thresholds || {}).filter(([, value]) => value !== undefined)),
+    }),
     siteUrl: siteUrl || config.siteUrl || '',
   });
 }

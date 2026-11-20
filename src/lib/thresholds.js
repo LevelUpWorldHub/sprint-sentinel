@@ -28,11 +28,21 @@ function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
+/** A setting counts only when it is a real number. Blank, null, and non-numeric values mean "use the default". */
+function readSetting(raw) {
+  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null;
+  if (typeof raw !== 'string') return null;
+  const text = raw.trim();
+  if (!text) return null;
+  const value = Number(text);
+  return Number.isFinite(value) ? value : null;
+}
+
 export function sanitizeThresholds(input = {}) {
   const next = { ...DEFAULT_THRESHOLDS };
   for (const [key, [min, max]] of Object.entries(LIMITS)) {
-    const value = Number(input?.[key]);
-    if (Number.isFinite(value)) next[key] = clamp(value, min, max);
+    const value = readSetting(input?.[key]);
+    if (value !== null) next[key] = clamp(value, min, max);
   }
   return next;
 }

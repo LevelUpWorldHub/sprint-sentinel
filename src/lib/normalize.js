@@ -12,8 +12,9 @@ function linkIssue(issue) {
   };
 }
 
-export function blockersFromLinks(links = []) {
+export function blockersFromLinks(links) {
   const blockers = [];
+  if (!Array.isArray(links)) return blockers;
   for (const link of links) {
     const inward = `${link?.type?.inward || ''} ${link?.type?.name || ''}`;
     if (link?.inwardIssue && /block/i.test(inward)) {
@@ -24,13 +25,22 @@ export function blockersFromLinks(links = []) {
   return blockers;
 }
 
+export const MAX_STORY_POINTS = 1000;
+
+/** Story points must be a finite number from 0 to 1000. Anything else is treated as unestimated. */
+function validPoints(value) {
+  return Number.isFinite(value) && value >= 0 && value <= MAX_STORY_POINTS ? value : null;
+}
+
 export function readStoryPoints(fields, fieldId) {
-  if (!fields) return null;
+  if (!fields || typeof fields !== 'object') return null;
   const candidates = [fieldId, 'customfield_10016', 'customfield_10028'].filter(Boolean);
   for (const id of candidates) {
     const value = fields[id];
-    if (typeof value === 'number') return value;
-    if (value && typeof value === 'object' && Number.isFinite(Number(value.value))) return Number(value.value);
+    if (typeof value === 'number') return validPoints(value);
+    if (value && typeof value === 'object' && value.value !== null && value.value !== '' && Number.isFinite(Number(value.value))) {
+      return validPoints(Number(value.value));
+    }
   }
   return null;
 }

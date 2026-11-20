@@ -20,6 +20,7 @@ export function createMemoryStore(initial = {}) {
     audits: { ...(initial.audits || {}) },
     snapshots: { ...(initial.snapshots || {}) },
     connection: initial.connection || null,
+    locks: new Map(),
   };
 
   return {
@@ -31,6 +32,13 @@ export function createMemoryStore(initial = {}) {
     async saveBaselines(projectKey, baselines) { state.baselines[projectKey] = clone(baselines); },
     async listProposals(projectKey) { return clone(state.proposals[projectKey] || []); },
     async saveProposals(projectKey, proposals) { state.proposals[projectKey] = clone(proposals).slice(0, 100); },
+    async acquireLock(name, ttlSeconds = 120, now = Date.now()) {
+      const held = state.locks.get(name);
+      if (held !== undefined && held > now) return false;
+      state.locks.set(name, now + ttlSeconds * 1000);
+      return true;
+    },
+    async releaseLock(name) { state.locks.delete(name); },
     async putProposal(projectKey, proposal) {
       const list = state.proposals[projectKey] || [];
       const index = list.findIndex((item) => item.id === proposal.id);

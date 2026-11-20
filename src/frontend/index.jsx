@@ -215,8 +215,9 @@ function ProjectApp({ data, setData, busy, setBusy, setError }) {
             isDisabled={busy}
             onClick={() => run('saveSettings', {
               spaceKey,
-              stalledInProgressDays: Number(stalledDays),
-              overloadIssueCount: Number(overloadCount),
+              // Send the text as typed. The server treats a blank field as "use the default".
+              stalledInProgressDays: String(stalledDays ?? '').trim(),
+              overloadIssueCount: String(overloadCount ?? '').trim(),
             })}
           >
             Save settings
